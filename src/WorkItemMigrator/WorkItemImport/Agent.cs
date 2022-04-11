@@ -502,9 +502,9 @@ namespace WorkItemImport
                     if (fieldRef == "System.Title")
                     {
                         int length = fieldValue.ToString().Length;
-                        if (length > 155)
+                        if (length > 255)
                         {
-                            fieldValue = fieldValue.ToString().Substring(0, 154);
+                            fieldValue = fieldValue.ToString().Substring(0, 254);
                         }
                     }
 
