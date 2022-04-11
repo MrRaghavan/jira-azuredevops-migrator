@@ -1111,7 +1111,7 @@ namespace WorkItemImport
                             JProperty allExecutions = jsonobject3.Property("executions");
                             JProperty allStatusText = jsonobject3.Property("status");
                             //Logger.Log(LogLevel.Info, "***allExecutions : " + allExecutions);
-                            int iterationId = 0;
+                            // int iterationId = 0;
                             foreach (JToken execution in allExecutions.Value)
                             {
                                 string releaseStatus = "";
@@ -1343,7 +1343,7 @@ namespace WorkItemImport
 
                                     }
 
-                                    bool toAdd = true;
+                                    //bool toAdd = true;
                                        
                                     if (pSuiteLast.AllTestCases.Count> 0)
                                     {
@@ -1352,7 +1352,7 @@ namespace WorkItemImport
                                             if (currentTestCase.WorkItem.Title.Contains(jiraIssueKey))
                                             {
                                                 //Logger.Log(LogLevel.Info, "This testcase already added to the TestSuite");
-                                                toAdd = false;
+                                                // toAdd = false;
                                                 pSuiteLast.Entries.Remove(currentTestCase);
                                                 break;
                                             }
@@ -1656,7 +1656,7 @@ namespace WorkItemImport
                     //var baseUrl = "https://dev.azure.com/tr-content-platform/Test/_apis/wit/workitems/$User%20Story";
                     //var baseUrl = "https://dev.azure.com/tr-content-platform";
                     var baseUrl = urlValue;
-                    //var pat = "";
+                    var pat = "";
                     // var vssConnection = new VssConnection(new Uri(baseUrl), new VssBasicCredential(string.Empty, pat));
                     //Microsoft.TeamFoundation.WorkItemTracking.WebApi.WorkItemTrackingHttpClient _workItemTrackingHttpClient = vssConnection.GetClient<Microsoft.TeamFoundation.WorkItemTracking.WebApi.WorkItemTrackingHttpClient>();
                     var document = new Microsoft.VisualStudio.Services.WebApi.Patch.Json.JsonPatchDocument();
