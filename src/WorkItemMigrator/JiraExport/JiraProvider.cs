@@ -86,12 +86,25 @@ namespace JiraExport
 
         private JiraItem ProcessItem(string issueKey, HashSet<string> skipList)
         {
-            var issue = JiraItem.CreateFromRest(issueKey, this);
-            if (issue == null)
-                return default(JiraItem);
+            try
+            {
+                var issue = JiraItem.CreateFromRest(issueKey, this);
+                if (issue == null)
+                    return default(JiraItem);
 
-            skipList.Add(issue.Key);
-            return issue;
+                skipList.Add(issue.Key);
+                return issue;
+            }
+            catch (AggregateException ae)
+            {
+                Logger.Log(LogLevel.Error, $"AggregateException Occured {issueKey} : {ae}");
+                return default(JiraItem);
+            }
+            catch (NullReferenceException ae)
+            {
+                Logger.Log(LogLevel.Error, $"NullReferenceException Occured {issueKey} : {ae}");
+                return default(JiraItem);
+            }
         }
 
         private async Task<JiraAttachment> GetAttachmentInfo(string id)

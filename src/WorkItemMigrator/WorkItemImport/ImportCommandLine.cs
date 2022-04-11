@@ -12,6 +12,8 @@ using Migration.Common;
 using Migration.Common.Config;
 using Migration.Common.Log;
 
+using System.Collections;
+
 namespace WorkItemImport
 {
     public class ImportCommandLine
@@ -110,6 +112,7 @@ namespace WorkItemImport
 
                 BeginSession(configFileName, config, forceFresh, agent, itemCount, revisionCount);
 
+                Hashtable htParentLateUpdates = new Hashtable();
                 while (plan.TryPop(out ExecutionPlan.ExecutionItem executionItem))
                 {
                     try
@@ -126,7 +129,8 @@ namespace WorkItemImport
 
                         Logger.Log(LogLevel.Info, $"Processing {importedItems + 1}/{revisionCount} - wi '{(wi.Id > 0 ? wi.Id.ToString() : "Initial revision")}', jira '{executionItem.OriginId}, rev {executionItem.Revision.Index}'.");
 
-                        agent.ImportRevision(executionItem.Revision, wi);
+                        //agent.ImportRevision(executionItem.Revision, wi);
+                        agent.ImportRevision(executionItem.Revision, wi, agent.Collection, executionItem.Revision.Index, config.Workspace, htParentLateUpdates, url.Value());
                         importedItems++;
                     }
                     catch (AbortMigrationException)

@@ -124,12 +124,13 @@ namespace JiraExport
 
         #region Mapping definitions
 
-        private WiRevision MapRevision(JiraRevision r)
+        private WiRevision MapRevision(JiraRevision r, JiraItem issue)
         {
             Logger.Log(LogLevel.Debug, $"Mapping revision {r.Index}.");
 
             List<WiAttachment> attachments = MapAttachments(r);
-            List<WiField> fields = MapFields(r);
+            // List<WiField> fields = MapFields(r);
+            List<WiField> fields = MapFields(r, issue);
             List<WiLink> links = MapLinks(r);
 
             return new WiRevision()
@@ -164,10 +165,12 @@ namespace JiraExport
 
                 if (type != null)
                 {
-                    var revisions = issue.Revisions.Select(r => MapRevision(r)).ToList();
+                    // var revisions = issue.Revisions.Select(r => MapRevision(r)).ToList();
+                    var revisions = issue.Revisions.Select(r => MapRevision(r, issue)).ToList();
                     wiItem.OriginId = issue.Key;
                     wiItem.Type = type;
                     wiItem.Revisions = revisions;
+                    // Logger.Log(LogLevel.Info, revisions.ToString());
                 }
                 else
                 {
@@ -225,7 +228,8 @@ namespace JiraExport
             if (r.Fields.TryGetValue(field, out object value))
             {
                 var parentKeyStr = r.OriginId.Substring(r.OriginId.LastIndexOf("-", StringComparison.InvariantCultureIgnoreCase) + 1);
-                var childKeyStr = value?.ToString().Substring(r.OriginId.LastIndexOf("-", StringComparison.InvariantCultureIgnoreCase) + 1);
+                //var childKeyStr = value?.ToString().Substring(r.OriginId.LastIndexOf("-", StringComparison.InvariantCultureIgnoreCase) + 1);
+                var childKeyStr = value?.ToString().Substring((value?.ToString()).LastIndexOf("-", StringComparison.InvariantCultureIgnoreCase) + 1);
 
                 if (int.TryParse(parentKeyStr, out var parentKey) && int.TryParse(childKeyStr, out var childKey))
                 {
@@ -261,7 +265,8 @@ namespace JiraExport
             return attachments;
         }
 
-        private List<WiField> MapFields(JiraRevision r)
+        // private List<WiField> MapFields(JiraRevision r)
+        private List<WiField> MapFields(JiraRevision r, JiraItem issue)
         {
             var fields = new List<WiField>();
 
@@ -280,6 +285,19 @@ namespace JiraExport
 
                             if (include)
                             {
+                                if (fieldreference == "System.Description" || fieldreference == "System.History")
+                                {
+                                    if (!string.IsNullOrEmpty(value.ToString()))
+                                    {
+                                        //Logger.Log(LogLevel.Info, "\n ++++++++");
+                                        //value = Regex.Replace(value.ToString(), @"[^\u0000-\u007F]", " ");
+                                        value = value.ToString().Replace("\\U", "\\");
+                                        value = value.ToString().Replace("\\u", "\\");
+                                        value = value.ToString().Replace("\\0000", "\\");
+                                        value = value.ToString().Replace("\\00", "\\");
+                                        //Logger.Log(LogLevel.Info, "\n ----------");
+                                    }
+                                }
                                 Logger.Log(LogLevel.Debug, $"Mapped value '{value}' to field '{fieldreference}'.");
                                 fields.Add(new WiField()
                                 {
@@ -328,7 +346,8 @@ namespace JiraExport
 
                     if (item.Mapping?.Values != null)
                     {
-                        value = r => MapValue(r, item.Source);
+                        // value = r => MapValue(r, item.Source);
+                        value = r => MapValue(r, item.Source, item.Target);
                     }
                     else if (!string.IsNullOrWhiteSpace(item.Mapper))
                     {
@@ -479,7 +498,8 @@ namespace JiraExport
                 return (false, null);
         }
 
-        private (bool, object) MapValue(JiraRevision r, string itemSource)
+        // private (bool, object) MapValue(JiraRevision r, string itemSource)
+        private (bool, object) MapValue(JiraRevision r, string itemSource, string itemTarget)
         {
             var targetWit = (from t in _config.TypeMap.Types where t.Source == r.Type select t.Target).FirstOrDefault();
 
@@ -487,7 +507,8 @@ namespace JiraExport
             {
                 foreach (var item in _config.FieldMap.Fields)
                 {
-                    if (((item.Source == itemSource && (item.For.Contains(targetWit) || item.For == "All")) ||
+                    // if (((item.Source == itemSource && (item.For.Contains(targetWit) || item.For == "All")) ||
+                    if ((((item.Source == itemSource && item.Target == itemTarget) && (item.For.Contains(targetWit) || item.For == "All")) ||
                           item.Source == itemSource && (!string.IsNullOrWhiteSpace(item.NotFor) && !item.NotFor.Contains(targetWit))) &&
                           item.Mapping?.Values != null)
                     {

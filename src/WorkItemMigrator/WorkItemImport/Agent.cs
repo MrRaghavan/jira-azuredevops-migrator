@@ -11,6 +11,19 @@ using Microsoft.TeamFoundation.Core.WebApi;
 using Microsoft.TeamFoundation.WorkItemTracking.Client;
 using Microsoft.VisualStudio.Services.Common;
 using Microsoft.VisualStudio.Services.Operations;
+using Microsoft.TeamFoundation.TestManagement.Client;
+using Newtonsoft.Json.Linq;
+using System.IO;
+using System.Text;
+
+using Microsoft.TeamFoundation.WorkItemTracking.WebApi;
+using Microsoft.TeamFoundation.WorkItemTracking.WebApi.Models;
+using Microsoft.VisualStudio.Services.Common;
+using Microsoft.VisualStudio.Services.WebApi;
+using Microsoft.VisualStudio.Services.WebApi.Patch;
+using Microsoft.VisualStudio.Services.WebApi.Patch.Json;
+using System.Collections;
+using Microsoft.TeamFoundation.Framework.Client;
 
 using Migration.Common;
 using Migration.Common.Log;
@@ -114,14 +127,14 @@ namespace WorkItemImport
             return agent;
         }
 
-        internal WorkItem CreateWI(string type)
+        internal Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem CreateWI(string type)
         {
             var project = Store.Projects[Settings.Project];
             var wiType = project.WorkItemTypes[type];
             return wiType.NewWorkItem();
         }
 
-        internal WorkItem GetWorkItem(int wiId)
+        internal Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem GetWorkItem(int wiId)
         {
             return Store.GetWorkItem(wiId);
         }
@@ -230,7 +243,7 @@ namespace WorkItemImport
                 OperationReference operation = await projectClient.QueueCreateProject(projectCreateParameters);
 
                 // Check the operation status every 5 seconds (for up to 30 seconds)
-                Operation completedOperation = WaitForLongRunningOperation(operation.Id, 5, 30).Result;
+                Microsoft.VisualStudio.Services.Operations.Operation completedOperation = WaitForLongRunningOperation(operation.Id, 5, 30).Result;
 
                 // Check if the operation succeeded (the project was created) or failed
                 if (completedOperation.Status == OperationStatus.Succeeded)
@@ -256,7 +269,7 @@ namespace WorkItemImport
             return project;
         }
 
-        private async Task<Operation> WaitForLongRunningOperation(Guid operationId, int interavalInSec = 5, int maxTimeInSeconds = 60, CancellationToken cancellationToken = default(CancellationToken))
+        private async Task<Microsoft.VisualStudio.Services.Operations.Operation> WaitForLongRunningOperation(Guid operationId, int interavalInSec = 5, int maxTimeInSeconds = 60, CancellationToken cancellationToken = default(CancellationToken))
         {
             OperationsHttpClient operationsClient = RestConnection.GetClient<OperationsHttpClient>();
             DateTime expiration = DateTime.Now.AddSeconds(maxTimeInSeconds);
@@ -266,7 +279,7 @@ namespace WorkItemImport
             {
                 Logger.Log(LogLevel.Info, $" Checking status ({checkCount++})... ");
 
-                Operation operation = await operationsClient.GetOperation(operationId, cancellationToken);
+                Microsoft.VisualStudio.Services.Operations.Operation operation = await operationsClient.GetOperation(operationId, cancellationToken);
 
                 if (!operation.Completed)
                 {
@@ -372,7 +385,7 @@ namespace WorkItemImport
 
         #region Import Revision
 
-        private bool UpdateWIFields(IEnumerable<WiField> fields, WorkItem wi)
+        private bool UpdateWIFields(IEnumerable<WiField> fields, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             var success = true;
 
@@ -395,12 +408,18 @@ namespace WorkItemImport
 
                             if (!string.IsNullOrWhiteSpace((string)fieldValue))
                             {
+                                var iterationAppendValue = (string)fieldValue;
+                                iterationAppendValue = Regex.Replace(iterationAppendValue, "[\\/$?*:&<>#%|+]", "-");
+                                //Logger.Log(LogLevel.Info, $"Mapped IterationPath '{wi.IterationPath}'.");
+                                iterationAppendValue = Regex.Replace(iterationAppendValue, "\\\\\"", " -");
                                 if (string.IsNullOrWhiteSpace(iterationPath))
-                                    iterationPath = (string)fieldValue;
+                                    // iterationPath = (string)fieldValue;
+                                    iterationPath = iterationAppendValue;
                                 else
-                                    iterationPath = string.Join("/", iterationPath, (string)fieldValue);
+                                    // iterationPath = string.Join("/", iterationPath, (string)fieldValue);
+                                    iterationPath = string.Join("/", iterationPath, iterationAppendValue);
                             }
-
+                            //Logger.Log(LogLevel.Info, $"Mapped IterationPath '{wi.IterationPath}'.");
                             if (!string.IsNullOrWhiteSpace(iterationPath))
                             {
                                 EnsureClasification(iterationPath, WebModel.TreeStructureGroup.Iterations);
@@ -419,10 +438,15 @@ namespace WorkItemImport
 
                             if (!string.IsNullOrWhiteSpace((string)fieldValue))
                             {
-                                if (string.IsNullOrWhiteSpace(areaPath))
-                                    areaPath = (string)fieldValue;
+                                var areaAppendValue = (string)fieldValue;
+                                areaAppendValue = Regex.Replace(areaAppendValue, "[\\/$?*:&<>#%|+]", "-");
+                                areaAppendValue = Regex.Replace(areaAppendValue, "\\\\\"", "-");
+                                if (string.IsNullOrWhiteSpace(areaPath))                                    
+                                    // areaPath = (string)fieldValue;
+                                    areaPath = areaAppendValue;
                                 else
-                                    areaPath = string.Join("/", areaPath, (string)fieldValue);
+                                    // areaPath = string.Join("/", areaPath, (string)fieldValue);
+                                    areaPath = string.Join("/", areaPath, areaAppendValue);
                             }
 
                             if (!string.IsNullOrWhiteSpace(areaPath))
@@ -465,11 +489,24 @@ namespace WorkItemImport
             return success;
         }
 
-        private static void SetFieldValue(WorkItem wi, string fieldRef, object fieldValue)
+        private static void SetFieldValue(Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi, string fieldRef, object fieldValue)
         {
             try
             {
-                var field = wi.Fields[fieldRef];
+                //if (fieldRef != "WEF_3833D59EA86C405986E666B2297ACB95_Kanban.Column" && fieldRef != "WEF_3833D59EA86C405986E666B2297ACB95_Kanban.Lane")
+                if (!fieldRef.EndsWith("Kanban.Column") && !fieldRef.EndsWith("Kanban.Lane"))
+                {
+
+                    var field = wi.Fields[fieldRef];
+
+                    if (fieldRef == "System.Title")
+                    {
+                        int length = fieldValue.ToString().Length;
+                        if (length > 155)
+                        {
+                            fieldValue = fieldValue.ToString().Substring(0, 154);
+                        }
+                    }
 
                 field.Value = fieldValue;
 
@@ -480,16 +517,19 @@ namespace WorkItemImport
                     field.Value = null;
                     Logger.Log(LogLevel.Warning, $"Mapped empty value for '{fieldRef}', because value was not valid");
                 }
+                }
+
             }
             catch (ValidationException ex)
             {
-                Logger.Log(LogLevel.Error, ex.Message);
+                //Logger.Log(LogLevel.Error, ex.Message);
+                Logger.Log(LogLevel.Error, $"WorkItem ID: '{wi.Id}' : Field Name: '{fieldRef}' : Field Value: '{fieldValue}' : '{ex.Message}'.");
             }
 
 
         }
 
-        private bool ApplyAttachments(WiRevision rev, WorkItem wi, Dictionary<string, Attachment> attachmentMap)
+        private bool ApplyAttachments(WiRevision rev, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi, Dictionary<string, Attachment> attachmentMap)
         {
             var success = true;
 
@@ -539,14 +579,14 @@ namespace WorkItemImport
             return success;
         }
 
-        private Attachment IdentifyAttachment(WiAttachment att, WorkItem wi)
+        private Attachment IdentifyAttachment(WiAttachment att, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             if (_context.Journal.IsAttachmentMigrated(att.AttOriginId, out int attWiId))
                 return wi.Attachments.Cast<Attachment>().SingleOrDefault(a => a.Id == attWiId);
             return null;
         }
 
-        private bool ApplyLinks(WiRevision rev, WorkItem wi)
+        private bool ApplyLinks(WiRevision rev, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             bool success = true;
 
@@ -596,7 +636,7 @@ namespace WorkItemImport
             return success;
         }
 
-        private bool AddLink(WiLink link, WorkItem wi)
+        private bool AddLink(WiLink link, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             var linkEnd = ParseLinkEnd(link, wi);
 
@@ -641,7 +681,7 @@ namespace WorkItemImport
 
         }
 
-        private RelatedLink ResolveCiclycalLinks(RelatedLink link, WorkItem wi)
+        private RelatedLink ResolveCiclycalLinks(RelatedLink link, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             if (link.LinkTypeEnd.LinkType.IsNonCircular && DetectCycle(wi, link))
                 return new RelatedLink(link.LinkTypeEnd.OppositeEnd, link.RelatedWorkItemId);
@@ -649,7 +689,7 @@ namespace WorkItemImport
             return link;
         }
 
-        private bool DetectCycle(WorkItem startingWi, RelatedLink startingLink)
+        private bool DetectCycle(Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem startingWi, RelatedLink startingLink)
         {
             var nextWiLink = startingLink;
             do
@@ -665,7 +705,7 @@ namespace WorkItemImport
             return false;
         }
 
-        private WorkItemLinkTypeEnd ParseLinkEnd(WiLink link, WorkItem wi)
+        private WorkItemLinkTypeEnd ParseLinkEnd(WiLink link, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             var props = link.WiType?.Split('-');
             var linkType = wi.Project.Store.WorkItemLinkTypes.SingleOrDefault(lt => lt.ReferenceName == props?[0]);
@@ -690,7 +730,7 @@ namespace WorkItemImport
             return linkEnd;
         }
 
-        private bool RemoveLink(WiLink link, WorkItem wi)
+        private bool RemoveLink(WiLink link, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             var linkToRemove = wi.Links.OfType<RelatedLink>().SingleOrDefault(rl => rl.LinkTypeEnd.ImmutableName == link.WiType && rl.RelatedWorkItemId == link.TargetWiId);
             if (linkToRemove == null)
@@ -702,7 +742,7 @@ namespace WorkItemImport
             return true;
         }
 
-        private void SaveWorkItem(WiRevision rev, WorkItem newWorkItem)
+        private void SaveWorkItem(WiRevision rev, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem newWorkItem)
         {
             if (!newWorkItem.IsValid())
             {
@@ -730,7 +770,7 @@ namespace WorkItemImport
             }
         }
 
-        private bool RemoveLinksFromWiThatExceedsLimit(WorkItem newWorkItem)
+        private bool RemoveLinksFromWiThatExceedsLimit(Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem newWorkItem)
         {
             var links = newWorkItem.Links.OfType<RelatedLink>().ToList();
             var result = false;
@@ -760,7 +800,7 @@ namespace WorkItemImport
             }
         }
 
-        private void EnsureAssigneeField(WiRevision rev, WorkItem wi)
+        private void EnsureAssigneeField(WiRevision rev, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             string assignedTo = wi.Fields[WiFieldReference.AssignedTo].Value.ToString();
 
@@ -773,7 +813,7 @@ namespace WorkItemImport
             rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.AssignedTo, Value = assignedTo });
         }
 
-        private void EnsureDateFields(WiRevision rev, WorkItem wi)
+        private void EnsureDateFields(WiRevision rev, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             if (rev.Index == 0 && !rev.Fields.HasAnyByRefName(WiFieldReference.CreatedDate))
             {
@@ -792,7 +832,7 @@ namespace WorkItemImport
         }
 
 
-        private void EnsureFieldsOnStateChange(WiRevision rev, WorkItem wi)
+        private void EnsureFieldsOnStateChange(WiRevision rev, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi)
         {
             if (rev.Index != 0 && rev.Fields.HasAnyByRefName(WiFieldReference.State))
             {
@@ -815,7 +855,7 @@ namespace WorkItemImport
             }
         }
 
-        private bool CorrectDescription(WorkItem wi, WiItem wiItem, WiRevision rev)
+        private bool CorrectDescription(Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi, WiItem wiItem, WiRevision rev)
         {
             string description = wi.Type.Name == "Bug" ? wi.Fields[WiFieldReference.ReproSteps].Value.ToString() : wi.Description;
             if (string.IsNullOrWhiteSpace(description))
@@ -840,7 +880,7 @@ namespace WorkItemImport
             return descUpdated;
         }
 
-        private void CorrectComment(WorkItem wi, WiItem wiItem, WiRevision rev)
+        private void CorrectComment(Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi, WiItem wiItem, WiRevision rev)
         {
             var currentComment = wi.History;
             var commentUpdated = false;
@@ -850,7 +890,7 @@ namespace WorkItemImport
                 wi.Fields[CoreField.History].Value = currentComment;
         }
 
-        private void CorrectImagePath(WorkItem wi, WiItem wiItem, WiRevision rev, ref string textField, ref bool isUpdated)
+        private void CorrectImagePath(Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi, WiItem wiItem, WiRevision rev, ref string textField, ref bool isUpdated)
         {
             foreach (var att in wiItem.Revisions.SelectMany(r => r.Attachments.Where(a => a.Change == ReferenceChangeType.Added)))
             {
@@ -882,7 +922,8 @@ namespace WorkItemImport
             }
         }
 
-        public bool ImportRevision(WiRevision rev, WorkItem wi)
+        // public bool ImportRevision(WiRevision rev, WorkItem wi)
+        public bool ImportRevision(WiRevision rev, Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItem wi, TfsTeamProjectCollection collection, int thisRevision, String jsonPath, Hashtable htParent, String urlValue)
         {
             var incomplete = false;
             try
@@ -898,6 +939,39 @@ namespace WorkItemImport
                 var attachmentMap = new Dictionary<string, Attachment>();
                 if (rev.Attachments.Any() && !ApplyAttachments(rev, wi, attachmentMap))
                     incomplete = true;
+
+                //var thisWorkitemID = wi.Id.ToString();
+                var thisIssueID = rev.ParentOriginId;
+                foreach (var fieldData in rev.Fields)
+                {                    
+                    String lateFieldName = "";
+                    String lateFieldValue = "";
+                    
+                    if (fieldData.ReferenceName.EndsWith("Kanban.Column") || fieldData.ReferenceName.EndsWith("Kanban.Lane"))
+                    {
+                        //Logger.Log(LogLevel.Info, rev.ParentOriginId + " : " + htParent[thisIssueID]);
+                        lateFieldName = fieldData.ReferenceName;
+                        lateFieldValue = fieldData.Value.ToString();
+                        if (htParent.ContainsKey(thisIssueID))
+                        {
+                            Hashtable htLateUpdates = (Hashtable)htParent[thisIssueID];
+                            if (!htLateUpdates.ContainsKey(lateFieldName))
+                            {
+                                htLateUpdates.Add(lateFieldName, lateFieldValue);
+                                htParent[thisIssueID] = htLateUpdates;
+                            }
+                            else
+                                htLateUpdates[lateFieldName] = lateFieldValue;
+                        }
+                        else
+                        {
+                            Hashtable htLateUpdates = new Hashtable();
+                            htLateUpdates.Add(lateFieldName, lateFieldValue);
+                            htParent.Add(thisIssueID, htLateUpdates);
+                        }                        
+                        //Logger.Log(LogLevel.Info, lateFieldName + ":" + lateFieldValue);
+                    }
+                }
 
                 if (rev.Fields.Any() && !UpdateWIFields(rev.Fields, wi))
                     incomplete = true;
@@ -946,7 +1020,669 @@ namespace WorkItemImport
 
                 Logger.Log(LogLevel.Debug, $"Imported revision.");
 
+                //Logger.Log(LogLevel.Info, "***rev.ParentOriginId:" + rev.ParentOriginId);
+                Microsoft.TeamFoundation.WorkItemTracking.Client.WorkItemType wit = wi.Type;
+                String wiTypeName = wit.Name;
+                //Logger.Log(LogLevel.Info, "**** " + wi.Project + "***** " + wi.Id + "***** " + rev.ToString());
+                //String thisRevisionTemp = rev.ToString().Split(',').Last().Trim();
+                //String thisRevision = thisRevisionTemp.ToString().Split(' ').Last().Trim();
+                // Logger.Log(LogLevel.Info, "***thisRevision:" + thisRevision);
+                // if (wiTypeName == "Test Case" && int.Parse(thisRevision) == totalRevisions-1)
+                //if (wiTypeName == "Test Case" && int.Parse(thisRevision) == 0)
+                if (wiTypeName == "Test Case")
+                {
+                    //string path = "C:\\migration\\UKBL\\data1\\" + rev.ParentOriginId + ".json";
+                    string path = jsonPath + "\\" + rev.ParentOriginId + ".json";
+                    string text = File.ReadAllText(path);
+                    //JToken test = JArray.Parse(text).Last();
+                    var jsonobject = JObject.Parse(text);
+                    // Logger.Log(LogLevel.Info, "******* readjson: " + jsonobject);                    
+                    JProperty allRevisions = jsonobject.Property("Revisions");
+                    JToken lastrevision = allRevisions.Value.Last;
+                    String lastindex = lastrevision["Index"].ToString();
+                    //Logger.Log(LogLevel.Info, "******* index value: " + allRevisions.Value);
+                    //Logger.Log(LogLevel.Info, "******* index value: " + allRevisions.Value.Last);
+                    //Logger.Log(LogLevel.Info, "******* last index value: " + lastrevision["Index"].ToString());
+
+                    if (int.Parse(lastindex) == thisRevision)
+                    {
+                        WebClient client = new WebClient();
+                        String userName = "ranjan_jira_to_ado";
+                        String passWord = "myjira";
+                        string credentials = Convert.ToBase64String(Encoding.ASCII.GetBytes(userName + ":" + passWord));
+                        client.Headers[HttpRequestHeader.Authorization] = "Basic " + credentials;
+                        String jiraURL = "https://jira.thomsonreuters.com/rest/api/2/issue/" + rev.ParentOriginId;
+                        ITestManagementService service = (ITestManagementService)collection.GetService(typeof(ITestManagementService));
+                        ITestManagementTeamProject testProject = service.GetTeamProject(wi.Project);
+                        ITestCase testCase = testProject.TestCases.Find(wi.Id);
+                        if (CheckURLNotValid(client, jiraURL))
+                        {
+                            Logger.Log(LogLevel.Info, "******* OLD JIRA ***********");
+                            //Logger.Log(LogLevel.Info, "******* " + wi.Project + "************" + wi.Id);
+                            ITestStep step = testCase.CreateTestStep();
+                            // step.Title = "*****test test test**********";
+                            // step.Description = "test test test";
+                            // step.ExpectedResult = "";
+                            testCase.Actions.Add(step);
+                            //testCase.Save();
+                        }
+                        else
+                        {
+                            Logger.Log(LogLevel.Info, "******* NEW JIRA ***********");                            
+                            
+                            string jiraIssueText = client.DownloadString(jiraURL);
+                            var jsonobject1 = JObject.Parse(jiraIssueText);
+                            String issueID = jsonobject1.Property("id").Value.ToString();
+                            //Logger.Log(LogLevel.Info, "***IssueID : " + issueID);
+                            string teststepText = client.DownloadString("https://jira.thomsonreuters.com/rest/zapi/latest/teststep/" + issueID);
+                            var jsonobject2 = JObject.Parse(teststepText);
+                            //JProperty allTeststep = jsonobject2.Property("stepBeanCollection");
+                            //var jsonobject3 = jsonobject2["stepBeanCollection"];
+                            JProperty allTeststep = null;
+                            allTeststep = jsonobject2.Property("stepBeanCollection");
+                            //Logger.Log(LogLevel.Info, "***allTeststep.Count : " + allTeststep.Count);
+                            //Logger.Log(LogLevel.Info, "***allTeststep.Value.ToList().Count : " + allTeststep.Value.ToList().Count);
+                            if (allTeststep == null || allTeststep.Value.ToList().Count == 0)
+                            {
+                                ITestStep stepTemp = testCase.CreateTestStep();
+                                testCase.Actions.Add(stepTemp);
+                                //testCase.Save();
+                            }
+                            foreach (JToken x in allTeststep.Value)
+                            {
+                                String teststep = x["step"].ToString();
+                                String data = x["data"].ToString();
+                                String result = x["result"].ToString();
+                                ITestStep step1 = testCase.CreateTestStep();
+                                step1.Title = "Step: " + teststep + "\nData: " + data;
+                                // step1.Description = "Step: " + teststep + "\nData: " + data;
+                                step1.ExpectedResult = result;
+                                // Logger.Log(LogLevel.Info, "***step1.Title : " + step1.Title);
+                                // Logger.Log(LogLevel.Info, "***step1.ExpectedResult : " + step1.ExpectedResult);
+                                testCase.Actions.Add(step1);
+                                // testCase.Save();
+                            } // end foreach allTeststep
+
+                            string testExecutionText = client.DownloadString("https://jira.thomsonreuters.com/rest/zapi/latest/execution?issueId=" + issueID);
+                            var jsonobject3 = JObject.Parse(testExecutionText);
+                            //Logger.Log(LogLevel.Info, "***jsonobject3 : " + jsonobject3);
+                            //JProperty allExecutions = jsonobject3.Property("executions");
+                            //var jsonobject3 = jsonobject3["executions"];                               
+                            JProperty allExecutions = jsonobject3.Property("executions");
+                            JProperty allStatusText = jsonobject3.Property("status");
+                            //Logger.Log(LogLevel.Info, "***allExecutions : " + allExecutions);
+                            int iterationId = 0;
+                            foreach (JToken execution in allExecutions.Value)
+                            {
+                                string releaseStatus = "";
+                                string cycleId = "";
+                                string cycleName = "";
+                                string folderId = "";
+                                string folderName = "";
+                                string versionId = "";
+                                string versionName = "";  
+                                string jiraIssueKey = "";
+                                string comment = "";
+                                string executedByDisplay = "";
+                                string executedByID = "";
+                                string executedOn = "";
+                                string executedOnVal = "";
+                                string executionStatusText = "";
+                                //string executionOutcome = "";
+
+
+                                //Logger.Log(LogLevel.Info, "***execution : " + execution);
+                                //Logger.Log(LogLevel.Info, "***cycleId : " + execution["cycleId"]);
+                                cycleId = execution["cycleId"].ToString();
+                                //Logger.Log(LogLevel.Info, "***cycleId : " + cycleId);
+                                cycleName = execution["cycleName"].ToString();
+                                //Logger.Log(LogLevel.Info, "***cycleName : " + cycleName);
+                                if (execution["folderId"] != null)
+                                {
+                                    folderId = execution["folderId"].ToString();
+                                    //Logger.Log(LogLevel.Info, "***folderId : " + folderId);
+                                    folderName = execution["folderName"].ToString();
+                                    //Logger.Log(LogLevel.Info, "***folderName : " + folderName);
+                                }
+                                versionId = execution["versionId"].ToString();
+                                //Logger.Log(LogLevel.Info, "***versionId : " + versionId);
+                                versionName = execution["versionName"].ToString();
+                                //Logger.Log(LogLevel.Info, "***versionName : " + versionName);
+                                String projectId = execution["projectId"].ToString();
+                                //Logger.Log(LogLevel.Info, "***projectId : " + projectId);
+                                String projectKey = execution["projectKey"].ToString();
+                                //Logger.Log(LogLevel.Info, "***projectKey : " + projectKey);
+                                String executionStatus = execution["executionStatus"].ToString();
+                                //Logger.Log(LogLevel.Info, "***executionStatus : " + executionStatus);
+                                
+                                jiraIssueKey = execution["issueKey"].ToString();
+                                comment = execution["comment"].ToString();
+                                if (execution["executedByDisplay"] != null)
+                                {
+                                    executedByDisplay = execution["executedByDisplay"].ToString();
+                                }
+                                if (execution["executedBy"] != null)
+                                {
+                                    executedByID = execution["executedBy"].ToString();
+                                }
+                                if (execution["executedOn"] != null)
+                                {
+                                    executedOn = execution["executedOn"].ToString();
+                                }
+                                if (execution["executedOnVal"] != null)
+                                {
+                                    executedOnVal = execution["executedOnVal"].ToString();
+                                }
+
+                                //Logger.Log(LogLevel.Info, "***before foreach allStatusText");
+                                //Logger.Log(LogLevel.Info, "***allStatusText : " + allStatusText);
+                                foreach (JProperty statusText in allStatusText.Value)
+                                {
+                                    //Logger.Log(LogLevel.Info, "***statusText : " + statusText);
+                                    JToken statusTextValue = statusText.Value;
+                                    //Logger.Log(LogLevel.Info, "***statusTextValue : " + statusText.Value);
+                                    //Logger.Log(LogLevel.Info, "***statusTextID : " + statusText["id"].ToString());
+                                    //Logger.Log(LogLevel.Info, "***statusTextName : " + statusText["name"].ToString());
+                                    //Logger.Log(LogLevel.Info, "***statusTextId : " + statusTextValue["id"].ToString());
+                                    if (statusTextValue["id"].ToString() == executionStatus)
+                                    {
+                                        executionStatusText = statusTextValue["name"].ToString();
+                                        //Logger.Log(LogLevel.Info, "***executionStatusText : " + executionStatusText);
+                                        break;
+                                    }
+                                }
+
+                                string projectVersionText = client.DownloadString("https://jira.thomsonreuters.com/rest/api/2/project/" + int.Parse(projectId) + "/version");
+                                var jsonobject4 = JObject.Parse(projectVersionText);
+                                //Logger.Log(LogLevel.Info, "***jsonobject4 : " + jsonobject4);
+                                JProperty allVersions = jsonobject4.Property("values");
+                                //Logger.Log(LogLevel.Info, "***allVersions : " + allVersions);
+                                foreach (JToken version in allVersions.Value)
+                                {                                    
+                                    if (version["id"].ToString() == versionId)
+                                    {
+                                        releaseStatus = version["released"].ToString();
+                                        //Logger.Log(LogLevel.Info, "***releaseStatus : " + releaseStatus);
+                                        break;
+                                    }
+                                }
+                                if (versionId == "-1")
+                                {
+                                    releaseStatus = "False";
+                                    //Logger.Log(LogLevel.Info, "***releaseStatus : " + releaseStatus);
+                                }
+
+                                ITestPlanCollection plans = null;
+
+                                /*ITestPlan defaultPlan = testProject.TestPlans.Create();
+                                defaultPlan.Name = "Default";
+                                defaultPlan.Save();  */                              
+                                plans = testProject.TestPlans.Query("Select * From TestPlan");
+                                //Logger.Log(LogLevel.Info, "000111");
+                                var check = plans.Where(pp => pp.Name == projectKey);
+                                //Logger.Log(LogLevel.Info, "11111");
+                                /*if (plans != null &&  check!=null && check.Any()) // at least one test plan already exists
+                                {
+                                    //Logger.Log(LogLevel.Info, "2222222");
+                                    var p = plans.Where(pp => pp.Name == projectKey).First();
+                                    //Logger.Log(LogLevel.Info, "333333");
+                                    //Logger.Log(LogLevel.Info, "***Plan Name : " + p.Name);
+                                }
+                                else // create the non-existent test plan*/
+                                if (plans == null || check == null || !check.Any())
+                                {
+                                    ITestPlan testPlan = testProject.TestPlans.Create();
+                                    testPlan.Name = projectKey;
+                                    testPlan.Save();
+                                    //Logger.Log(LogLevel.Info, "***Test Plan Name : " + testPlan.Name);
+                                }
+                                ITestPlan plan = testProject.TestPlans.Query("Select * From TestPlan").Where(pp => pp.Name == projectKey).First();
+
+                                int suiteId;
+                                int lastSuiteId;
+
+                                IEnumerable<ITestSuiteEntry> pSuites = plan.RootSuite.Entries.Where(s => s.Title == "All Releases");
+                                if (pSuites == null || !pSuites.Any())
+                                {
+                                    IStaticTestSuite newSuite = testProject.TestSuites.CreateStatic();
+                                    newSuite.Title = "All Releases";
+                                    suiteId = newSuite.Id;
+                                    plan.RootSuite.Entries.Add(newSuite);
+                                    //IStaticTestSuite todelete = newSuite;
+                                    //Logger.Log(LogLevel.Info, "-----ReferenceEquals 1----- " + Object.ReferenceEquals(newSuite, todelete));
+                                    //Logger.Log(LogLevel.Info, "-----ID Comparison 1----- " + newSuite.Id + "-----ID Comparison 2----- " + todelete.Id);
+                                    plan.Save();
+                                }
+                                //suiteId = plan.RootSuite.Entries.Where(s => s.Title == "All Releases").First().Id;
+                                IStaticTestSuite pSuite = plan.RootSuite.Entries.Where(s => s.Title == "All Releases").First().TestSuite as IStaticTestSuite;
+                                //Logger.Log(LogLevel.Info, "-----ReferenceEquals 2----- " + Object.ReferenceEquals(pSuite, plan.RootSuite.Entries.Where(s => s.Title == "All Releases").First().TestSuite as IStaticTestSuite));
+                                //Logger.Log(LogLevel.Info, "-----ID Comparison 3----- " + pSuite.Id + "-----ID Comparison 4----- " + plan.RootSuite.Entries.Where(s => s.Title == "All Releases").First().TestSuite.Id);
+
+                                if (!String.IsNullOrEmpty(releaseStatus))
+                                {
+                                    if (releaseStatus == "True")
+                                    {
+                                        releaseStatus = "Released";
+                                    }
+                                    else
+                                    {
+                                        releaseStatus = "Unreleased";
+                                    }
+                                    
+                                    IEnumerable<ITestSuiteEntry> pSuitesL1 = pSuite.Entries.Where(s => s.Title == releaseStatus);
+                                    if (pSuitesL1 == null || !pSuitesL1.Any())
+                                    {
+                                        IStaticTestSuite newSuite = testProject.TestSuites.CreateStatic();
+                                        newSuite.Title = releaseStatus;
+                                        lastSuiteId = newSuite.Id;
+                                        pSuite.Entries.Add(newSuite);
+                                        plan.Save();
+                                    }
+                                    //lastSuiteId = pSuite.Entries.Where(s => s.Title == releaseStatus).First().Id;                                  
+                                    IStaticTestSuite pSuiteLast = pSuite.Entries.Where(s => s.Title == releaseStatus).First().TestSuite as IStaticTestSuite;
+                                    //Logger.Log(LogLevel.Info, "-----ReferenceEquals 3----- " + Object.ReferenceEquals(pSuiteLast, pSuite.Entries.Where(s => s.Title == releaseStatus).First().TestSuite as IStaticTestSuite));
+                                    //Logger.Log(LogLevel.Info, "-----ID Comparison 5----- " + pSuiteLast.Id + "-----ID Comparison 6----- " + pSuite.Entries.Where(s => s.Title == releaseStatus).First().TestSuite.Id);
+
+                                    IStaticTestSuite versionSuite = null;
+
+                                    if (!String.IsNullOrEmpty(versionName))
+                                    {
+                                        IEnumerable<ITestSuiteEntry> pSuitesL2 = pSuiteLast.Entries.Where(s => s.Title == versionName);
+                                        if (pSuitesL2 == null || !pSuitesL2.Any())
+                                        {
+                                            IStaticTestSuite newSuite = testProject.TestSuites.CreateStatic();
+                                            newSuite.Title = versionName;
+                                            lastSuiteId = newSuite.Id;
+                                            pSuiteLast.Entries.Add(newSuite);
+                                            plan.Save();
+                                        }
+                                        //lastSuiteId = pSuiteLast.Entries.Where(s => s.Title == versionName).First().Id;
+                                        //IStaticTestSuite temp = pSuiteLast.Entries.Where(s => s.Title == versionName).First().TestSuite as IStaticTestSuite;
+                                        pSuiteLast = pSuiteLast.Entries.Where(s => s.Title == versionName).First().TestSuite as IStaticTestSuite;
+                                        //Logger.Log(LogLevel.Info, "-----ReferenceEquals 4----- " + Object.ReferenceEquals(pSuiteLast, temp));
+                                        //Logger.Log(LogLevel.Info, "-----ID Comparison 7----- " + pSuiteLast.Id + "-----ID Comparison 8----- " + temp.Id);
+
+                                        versionSuite = pSuiteLast;
+                                    }
+
+                                    if (!String.IsNullOrEmpty(cycleName))
+                                    {
+                                        IEnumerable<ITestSuiteEntry> pSuitesL3 = pSuiteLast.Entries.Where(s => s.Title == cycleName);
+                                        if (pSuitesL3 == null || !pSuitesL3.Any())
+                                        {
+                                            IStaticTestSuite newSuite = testProject.TestSuites.CreateStatic();
+                                            newSuite.Title = cycleName;
+                                            lastSuiteId = newSuite.Id;
+                                            pSuiteLast.Entries.Add(newSuite);
+                                            plan.Save();
+                                        }
+                                        //lastSuiteId = pSuiteLast.Entries.Where(s => s.Title == versionName).First().Id;
+                                        //IStaticTestSuite temp = pSuiteLast.Entries.Where(s => s.Title == cycleName).First().TestSuite as IStaticTestSuite;
+                                        pSuiteLast = pSuiteLast.Entries.Where(s => s.Title == cycleName).First().TestSuite as IStaticTestSuite;
+                                        //Logger.Log(LogLevel.Info, "-----ReferenceEquals 5----- " + Object.ReferenceEquals(pSuiteLast, temp));
+                                        //Logger.Log(LogLevel.Info, "-----ID Comparison 9----- " + pSuiteLast.Id + "-----ID Comparison 10----- " + temp.Id);
+
+                                    }
+
+                                    if (!String.IsNullOrEmpty(folderName))
+                                    {
+                                        IEnumerable<ITestSuiteEntry> pSuitesL4 = pSuiteLast.Entries.Where(s => s.Title == folderName);
+                                        if (pSuitesL4 == null || !pSuitesL4.Any())
+                                        {
+                                            IStaticTestSuite newSuite = testProject.TestSuites.CreateStatic();
+                                            newSuite.Title = folderName;
+                                            lastSuiteId = newSuite.Id;
+                                            pSuiteLast.Entries.Add(newSuite);
+                                            plan.Save();
+                                        }
+                                        //lastSuiteId = pSuiteLast.Entries.Where(s => s.Title == versionName).First().Id;
+                                        //IStaticTestSuite temp = pSuiteLast.Entries.Where(s => s.Title == folderName).First().TestSuite as IStaticTestSuite;
+                                        pSuiteLast = pSuiteLast.Entries.Where(s => s.Title == folderName).First().TestSuite as IStaticTestSuite;
+                                        //Logger.Log(LogLevel.Info, "-----ReferenceEquals 6----- " + Object.ReferenceEquals(pSuiteLast, temp));
+                                        //Logger.Log(LogLevel.Info, "-----ID Comparison 11----- " + pSuiteLast.Id + "-----ID Comparison 12----- " + temp.Id);
+
+                                    }
+
+                                    bool toAdd = true;
+                                       
+                                    if (pSuiteLast.AllTestCases.Count> 0)
+                                    {
+                                        foreach (var currentTestCase in pSuiteLast.AllTestCases)
+                                        {
+                                            if (currentTestCase.WorkItem.Title.Contains(jiraIssueKey))
+                                            {
+                                                //Logger.Log(LogLevel.Info, "This testcase already added to the TestSuite");
+                                                toAdd = false;
+                                                pSuiteLast.Entries.Remove(currentTestCase);
+                                                break;
+                                            }
+                                        }
+
+                                    }
+                                    //if (toAdd)
+                                    //{                                        
+                                        pSuiteLast.Entries.Add(testCase);
+                                        plan.Save();
+                                    //}
+
+                                    ITestPointCollection testPointColl = plan.QueryTestPoints("SELECT * FROM TestPoint WHERE SuiteId = " + pSuiteLast.Id + " AND TestCaseId = " + testCase.Id);
+                                    if (testPointColl.Count > 0)
+                                    {
+                                        ITestPoint testpoint = testPointColl.First();
+                                        //var testRun = testProject.TestRuns.Find(122);
+                                        //Logger.Log(LogLevel.Info, "testProject.TestRuns.Count " + testProject.TestRuns.Count);
+                                        
+                                        var testRuns = testProject.TestRuns.Query("select * From TestRun WHERE Title = 'TestSuite ID: " + pSuiteLast.Id + "'");
+                                        //int testRunId = testpoint.MostRecentRunId;
+                                        //Logger.Log(LogLevel.Info, "-----testRunId----- " + testRunId);
+                                        ITestRun run = null;
+                                        bool isNew = false;
+                                        /*if (!testRuns.Any())
+                                        //if (testRunId <= 0)
+                                        {
+                                            //Logger.Log(LogLevel.Info, "-----TestRun NOT present-----");
+                                            run = plan.CreateTestRun(false);
+                                            run.Title = " TestSuite ID: " + pSuiteLast.Id + "; TestPoint ID: " + testpoint.Id.ToString() + "; TestCase ID: " + testCase.Id;
+                                            //run.Title = " TestSuite ID: " + pSuiteLast.Id;
+                                            run.AddTestPoint(testpoint, null);
+                                            run.Save();
+                                            run.Refresh();
+                                            isNew = true;
+                                        }
+                                        else
+                                        {
+                                            //var testRuns = testProject.TestRuns.Query("select * From TestRun WHERE Id = '" + testRunId + "'");
+                                            //Logger.Log(LogLevel.Info, "-----TestRun already present-----");
+                                            //run = testRuns.First();
+                                            run = testRuns.First();                                             
+                                        }*/
+                                        run = plan.CreateTestRun(false);
+                                        run.Title = " TestSuite ID: " + pSuiteLast.Id + "; TestPoint ID: " + testpoint.Id.ToString() + "; TestCase ID: " + testCase.Id;
+                                        run.AddTestPoint(testpoint, null);
+                                        run.Save();
+                                        run.Refresh();
+
+
+                                        var testResults = run.QueryResults();
+                                        //ITestCaseResult testResult = testResults.Single(r => r.TestCaseId == testCase.Id);
+                                        //run.AddTest(int.Parse(issueID), pSuiteLast.DefaultConfigurations[0].Id, pSuiteLast.Plan.Owner);
+                                        //Logger.Log(LogLevel.Info, "testpoint.ConfigurationId is " + testpoint.ConfigurationId);
+                                        //run.AddTest(int.Parse(issueID), pSuiteLast.DefaultConfigurations[0].Id, pSuiteLast.Plan.Owner);
+                                        //run.AddTest(int.Parse(issueID), testpoint.ConfigurationId, pSuiteLast.Plan.Owner);
+                                        //Logger.Log(LogLevel.Info, "Afer TestRun.AddTest Call");
+                                        int countTestResults = 0;
+                                        countTestResults = testResults.Count;
+                                        //Logger.Log(LogLevel.Info, "countTestResults: " + countTestResults);
+                                        ITestCaseResult testResult = null;
+                                        if (isNew)
+                                        {
+                                            testResult = run.QueryResults()[0];
+                                        }
+                                        else
+                                        {
+                                            //testResult = run.QueryResults()[countTestResults];
+                                            testResult = run.QueryResults()[0];
+                                        }
+
+
+
+                                        //ITestCaseResult testResult = run.QueryResults()[0]; // this works fine
+                                        //ITestCaseResult testResult = run.QueryResults()[countTestResults-1]; 
+                                        //ITestCaseResult testResult = run.QueryResults().Single(r => r.TestPointId == testpoint.Id);
+                                        //ITestCaseResultCollection testResults = testProject.TestResults.ByTestId(testCase.Id);
+                                        //iterationId = iterationId + 1;
+
+                                        var iteration = testResult.CreateIteration(1);
+                                        //var iteration = testResult.CreateIteration(iterationId);
+
+                                        //testResult.DateStarted = result.DateStarted;
+                                        if (!string.IsNullOrEmpty(executedOn))
+                                        {
+                                            testResult.DateCompleted = Convert.ToDateTime(executedOn);
+                                            iteration.DateCompleted = Convert.ToDateTime(executedOn);                                            
+                                            iteration.DateStarted = Convert.ToDateTime(executedOn);                                            
+                                        }
+                                            
+                                        //testResult.Outcome = executionOutcome;
+                                        if (executionStatusText == "PASS")
+                                        {
+                                            //testResult.Outcome = TestOutcome.Passed;
+                                            iteration.Outcome = TestOutcome.Passed;
+                                        }
+                                        else if (executionStatusText == "FAIL")
+                                        {
+                                            //testResult.Outcome = TestOutcome.Failed;
+                                            iteration.Outcome = TestOutcome.Failed;
+                                        }
+                                        else if (executionStatusText == "WIP")
+                                        {
+                                            //testResult.Outcome = TestOutcome.InProgress;
+                                            iteration.Outcome = TestOutcome.InProgress;
+                                        }
+                                        else if (executionStatusText == "BLOCKED")
+                                        {
+                                            //testResult.Outcome = TestOutcome.Blocked;
+                                            iteration.Outcome = TestOutcome.Blocked;
+                                        }
+                                        else if (executionStatusText == "UNEXECUTED")
+                                        {
+                                            //testResult.Outcome = TestOutcome.NotExecuted;
+                                            iteration.Outcome = TestOutcome.NotExecuted;
+                                        }
+                                        else
+                                        {
+                                            //testResult.Outcome = TestOutcome.NotExecuted;
+                                            iteration.Outcome = TestOutcome.NotExecuted;
+                                        }
+                                        //testResult.Comment = comment;
+                                        iteration.Comment = comment;
+                                        //var runByUser = $"{System.Environment.UserDomainName}\\{System.Environment.UserName}";
+                                        //TeamFoundationIdentity runByUser = new TeamFoundationIdentity();
+                                        //testResult.RunBy = executedByDisplay;
+                                        //testResult.OwnerName = executedByDisplay;
+                                        //testResult.State = TestResultState.Completed;
+                                        testResult.Iterations.Add(iteration);
+                                        testResult.State = TestResultState.Completed;
+                                        testResult.Outcome = iteration.Outcome;
+
+                                        //testResult.AssociateWorkItem(wi);
+
+                                        //Logger.Log(LogLevel.Info, "for each wi.Links");
+                                        foreach (var link in wi.Links.OfType<RelatedLink>().ToList())
+                                        {
+                                            var relatedWorkItem = GetWorkItem(link.RelatedWorkItemId);
+                                            
+                                            //Logger.Log(LogLevel.Info, "related work item is " + relatedWorkItem.Id);
+                                        }
+
+                                        //Logger.Log(LogLevel.Info, "Add Link");
+                                        String linkName = "Microsoft.VSTS.Common.TestedBy-Forward";
+                                        var props = linkName?.Split('-');
+                                        var linkType = wi.Project.Store.WorkItemLinkTypes.SingleOrDefault(lt => lt.ReferenceName == props?[0]);
+                                        if (linkType != null)
+                                        {
+                                            WorkItemLinkTypeEnd linkEnd = null;
+                                            linkEnd = linkType.ForwardEnd;
+                                            //Logger.Log(LogLevel.Info, "linkEnd" + linkEnd.ToString());
+                                            if (linkEnd != null)
+                                            {
+                                                //var relatedLink = new RelatedLink(linkEnd, pSuiteLast.Id);
+                                                var relatedLink = new RelatedLink(linkEnd, versionSuite.Id);
+                                                if (!IsDuplicateWorkItemLink(wi.Links, relatedLink))
+                                                {
+                                                    wi.Links.Add(relatedLink);
+                                                    wi.Save();
+                                                    //Logger.Log(LogLevel.Info, "created link");
+                                                }
+                                                else
+                                                {
+                                                    //Logger.Log(LogLevel.Info, "Did not create Duplicate Link");
+                                                }
+                                            }
+                                            
+                                        } // linktype
+
+                                        //Logger.Log(LogLevel.Info, "********" + run.Title);
+                                        testResult.Save();
+                                        testResult.Refresh();
+                                        run.Save();
+                                        run.Refresh();
+                                        testpoint.Save();
+                                        testpoint.Refresh();
+                                        pSuiteLast.Refresh();
+                                    }
+
+                                } // end if releasestatus
+
+
+                            } // end foreach allexecutions
+                              
+                        }
+
+                        testCase.Save();     
+                        
+/*                        Logger.Log(LogLevel.Info, "************");
+                        IStaticTestSuite newSuite = testProject.TestSuites.CreateStatic();
+                        Logger.Log(LogLevel.Info, "+++++++++++++");
+                        newSuite.Title = "All Releases";
+                        testPlan.RootSuite.Entries.Add(newSuite);
+                        IStaticTestSuite newSubSuite1 = testProject.TestSuites.CreateStatic();
+                        newSubSuite1.Title = "Unreleased";
+                        IStaticTestSuite newSubSuite2 = testProject.TestSuites.CreateStatic();
+                        newSubSuite2.Title = "Released";
+                        IStaticTestSuite pSuite = testPlan.RootSuite.Entries.Where(s => s.Title == "All Releases").First().TestSuite as IStaticTestSuite;
+                        pSuite.Entries.Add(newSubSuite1);
+                        pSuite.Entries.Add(newSubSuite2);
+                        testPlan.Save();
+                        IStaticTestSuite newSubSubSuite1 = testProject.TestSuites.CreateStatic();
+                        newSubSubSuite1.Title = "RPC 5.0";
+                        IStaticTestSuite pSubSuite = pSuite.Entries.Where(s => s.Title == "Unreleased").First().TestSuite as IStaticTestSuite;
+                        pSubSuite.Entries.Add(newSubSubSuite1);
+                        newSubSubSuite1.Entries.Add(testCase);
+                        testPlan.Save();
+
+                        // Create test configuration. You can reuse this instead of creating a new config everytime.
+                        ITestConfiguration config = CreateTestConfiguration(testProject, string.Format("My test config {0}", DateTime.Now));
+
+                        // Create test points. 
+                        IList<ITestPoint> testPoints = CreateTestPoints(newSubSubSuite1,
+                                                                        testPlan,                                                                        
+                                                                        new IdAndName[] { new IdAndName(config.Id, config.Name) });
+
+                        ITestRun testRun = testProject.TestRuns.Create();
+
+                        testRun.DateStarted = DateTime.Now;
+                        //testRun.AddTestPoint(testPoints, _currentIdentity);
+                        // Create test run using test points.
+                        ITestRun run = CreateTestRun(testProject, testPlan, testPoints);
+                        //testRun.DateCompleted = DateTime.Now;
+                        //testRun.Save(); // so results object is created
+
+                        var result1 = testRun.QueryResults()[0];
+                        //result.Owner = _currentIdentity;
+                        //result.Owner = _currentIdentity;
+                        //result.RunBy = _currentIdentity;
+                        // result.RunBy = _currentIdentity;
+                        result1.State = TestResultState.Completed;
+                        result1.DateStarted = DateTime.Now;
+                        result1.Duration = new TimeSpan(0L);
+                        result1.DateCompleted = DateTime.Now.AddMinutes(0.0);
+
+                        var iteration = result1.CreateIteration(1);
+                        iteration.DateStarted = DateTime.Now;
+                        iteration.DateCompleted = DateTime.Now;
+                        iteration.Duration = new TimeSpan(0L);
+                        //iteration.Comment = "Run from ADO Test Steps Editor by " + _currentIdentity.DisplayName;
+                        iteration.Comment = "Run from ADO Test Steps Editor by " + "prashant.ranjan@thomsonreuters.com";
+
+                        for (int actionIndex = 0; actionIndex < testCase.Actions.Count; actionIndex++)
+                        {
+                            var testAction = testCase.Actions[actionIndex];
+                            if (testAction is ISharedStepReference)
+                                continue;
+
+                            //var userStep = _testEditInfo.SimpleSteps[actionIndex];
+
+                            var stepResult = iteration.CreateStepResult(testAction.Id);
+                            stepResult.ErrorMessage = String.Empty;
+                            //stepResult.Outcome = userStep.Outcome;
+                            stepResult.Outcome = TestOutcome.Passed;
+
+                            /*foreach (var attachmentPath in userStep.AttachmentPaths)
+                            {
+                                var attachment = stepResult.CreateAttachment(attachmentPath);
+                                stepResult.Attachments.Add(attachment);
+                            }*/
+/*
+                            iteration.Actions.Add(stepResult);
+                        }
+
+                        var overallOutcome = TestOutcome.Passed;
+*/                        /*var overallOutcome = _testEditInfo.SimpleSteps.Any(s => s.Outcome != TestOutcome.Passed)
+                            ? TestOutcome.Failed
+                            : TestOutcome.Passed;*/
+/*
+                        iteration.Outcome = overallOutcome;
+
+                        result1.Iterations.Add(iteration);
+
+                        result1.Outcome = overallOutcome;
+                        result1.Save(false);
+
+*/                    
+
+
+                    } // if thisrevision
+
+                } // if testcase
+
+                string path1 = jsonPath + "\\" + rev.ParentOriginId + ".json";
+                string text1 = File.ReadAllText(path1);
+                //JToken test = JArray.Parse(text).Last();
+                var jsonobject5 = JObject.Parse(text1);
+                // Logger.Log(LogLevel.Info, "******* readjson: " + jsonobject);
+                JProperty allRevisions1 = jsonobject5.Property("Revisions");
+                JToken lastrevision1 = allRevisions1.Value.Last;
+                String lastindex1 = lastrevision1["Index"].ToString();
+                
+                var workitemID = wi.Id;
+                //var workitemID = 163064;
+                var jiraIssue = rev.ParentOriginId;
+
                 wi.Close();
+
+                if (int.Parse(lastindex1) == thisRevision)
+                {
+                    //var baseUrl = "https://dev.azure.com/tr-content-platform/Test/_apis/wit/workitems/$User%20Story";
+                    //var baseUrl = "https://dev.azure.com/tr-content-platform";
+                    var baseUrl = urlValue;
+                    //var pat = "";
+                    // var vssConnection = new VssConnection(new Uri(baseUrl), new VssBasicCredential(string.Empty, pat));
+                    //Microsoft.TeamFoundation.WorkItemTracking.WebApi.WorkItemTrackingHttpClient _workItemTrackingHttpClient = vssConnection.GetClient<Microsoft.TeamFoundation.WorkItemTracking.WebApi.WorkItemTrackingHttpClient>();
+                    var document = new Microsoft.VisualStudio.Services.WebApi.Patch.Json.JsonPatchDocument();
+
+                    //if (htLateUpdates.Count > 0)
+                    if (htParent.ContainsKey(jiraIssue))
+                    {
+                        Hashtable htValues = (Hashtable)htParent[jiraIssue];
+                        //foreach (var key in htLateUpdates.Keys)
+                        foreach (var key in htValues.Keys)
+                        {
+                            //Logger.Log(LogLevel.Info, htValues.Count + ":" + key + ":" + htValues[key]);
+                            String fieldPath = "/fields/" + key;
+                            document.Add(new Microsoft.VisualStudio.Services.WebApi.Patch.Json.JsonPatchOperation()
+                            {
+                                Operation = Microsoft.VisualStudio.Services.WebApi.Patch.Operation.Add,                                
+                                Path = fieldPath,                                
+                                Value = htValues[key]
+
+                            });
+                        }
+                        var vssConnection = new VssConnection(new Uri(baseUrl), new VssBasicCredential(string.Empty, pat));
+                        Microsoft.TeamFoundation.WorkItemTracking.WebApi.WorkItemTrackingHttpClient _workItemTrackingHttpClient = vssConnection.GetClient<Microsoft.TeamFoundation.WorkItemTracking.WebApi.WorkItemTrackingHttpClient>();
+                        var workItem = _workItemTrackingHttpClient.UpdateWorkItemAsync(document, workitemID).Result;
+                    }
+                } // if for board values
 
                 return true;
             }
@@ -961,6 +1697,19 @@ namespace WorkItemImport
             }
         }
 
+        private bool CheckURLNotValid(WebClient client, String jiraURL)
+        {
+            try
+            {
+                string responseText = client.DownloadString(jiraURL);
+            }
+            catch
+            {
+                return true;
+            }
+            return false;
+        }
+
         private void EnsureClassificationFields(WiRevision rev)
         {
             if (!rev.Fields.HasAnyByRefName(WiFieldReference.AreaPath))
@@ -968,6 +1717,42 @@ namespace WorkItemImport
 
             if (!rev.Fields.HasAnyByRefName(WiFieldReference.IterationPath))
                 rev.Fields.Add(new WiField() { ReferenceName = WiFieldReference.IterationPath, Value = "" });
+        }
+
+        private ITestConfiguration CreateTestConfiguration(ITestManagementTeamProject project, string title)
+        {
+            ITestConfiguration configuration = project.TestConfigurations.Create();
+            configuration.Name = title;
+            configuration.Description = "DefaultConfig";
+            //configuration.Values.Add(new KeyValuePair<string, string>("Browser", "IE"));
+            configuration.Values.Add(new KeyValuePair<string, string>("Browser", "Chrome"));
+            configuration.Save();
+            return configuration;
+        }
+
+        public static IList<ITestPoint> CreateTestPoints(IStaticTestSuite testSuite,
+                                                         ITestPlan testPlan,                                                         
+                                                         IList<IdAndName> testConfigs)
+        {
+            testSuite.SetEntryConfigurations(testSuite.Entries, testConfigs);
+            testPlan.Save();
+
+            ITestPointCollection tpc = testPlan.QueryTestPoints("SELECT * FROM TestPoint WHERE SuiteId = " + testSuite.Id);
+            return new List<ITestPoint>(tpc);
+        }
+
+        private static ITestRun CreateTestRun(ITestManagementTeamProject project,
+                                             ITestPlan plan,
+                                             IList<ITestPoint> points)
+        {
+            ITestRun run = plan.CreateTestRun(false);
+            foreach (ITestPoint tp in points)
+            {
+                run.AddTestPoint(tp, null);
+            }
+
+            run.Save();
+            return run;
         }
 
         #endregion

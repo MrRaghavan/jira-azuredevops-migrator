@@ -135,6 +135,10 @@ namespace JiraExport
             {
                 Logger.Log(LogLevel.Error, $"Invalid command line option(s): {e}");
             }
+            catch (AggregateException ae)
+            {
+                Logger.Log(LogLevel.Error, $"AggregateException Occured: {ae}");
+            }
             catch (Exception e)
             {
                 Logger.Log(e, $"Unexpected migration error.");
