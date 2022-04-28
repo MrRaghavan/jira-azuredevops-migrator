@@ -474,6 +474,8 @@ namespace WorkItemImport
                         default:
                             if (fieldValue != null)
                             {
+                                //String temp = fieldRef + " : " + fieldValue;
+                                // Logger.Log(LogLevel.Info, temp);
                                 SetFieldValue(wi, fieldRef, fieldValue);
                             }
                             break;
