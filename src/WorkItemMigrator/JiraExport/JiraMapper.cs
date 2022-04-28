@@ -374,6 +374,9 @@ namespace JiraExport
                             case "MapRemainingWork":
                                 value = IfChanged<string>(item.Source, isCustomField, MapRemainingWork);
                                 break;
+                            case "MapActualWork":
+                                value = IfChanged<string>(item.Source, isCustomField, MapRemainingWork);
+                                break;
                             case "MapRendered":
                                 value = r => MapRenderedValue(r, item.Source, isCustomField);
                                 break;
@@ -450,6 +453,12 @@ namespace JiraExport
 
 
         private object MapRemainingWork(string seconds)
+        {
+            var secs = Convert.ToDouble(seconds);
+            return TimeSpan.FromSeconds(secs).TotalHours;
+        }
+
+        private object MapActualWork(string seconds)
         {
             var secs = Convert.ToDouble(seconds);
             return TimeSpan.FromSeconds(secs).TotalHours;
